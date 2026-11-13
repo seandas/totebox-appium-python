@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.vscode/
+artifacts/
+.claude/settings.local.json
+allure-results/
+allure-report/
+SESSION_NOTES.md

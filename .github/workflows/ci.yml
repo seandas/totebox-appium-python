@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      marker:
+        description: "pytest marker expression (empty runs all 50 tests)"
+        default: ""
+
+# A newer push to the same branch cancels the run in progress
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  appium-tests:
+    name: Appium tests (API 34 emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # Same versions as local development; driver 9.x needs Appium 4
+      - name: Install Appium and the UiAutomator2 driver
+        run: |
+          npm install -g appium@3.9.0
+          appium driver install uiautomator2@8.7.3
+
+      # Lets the emulator use hardware acceleration on GitHub's Linux runners
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Pushes and PRs run the smoke tests; a manual run can choose any marker, or everything
+      - name: Run the tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          script: bash .github/scripts/run-tests.sh "${{ github.event_name == 'workflow_dispatch' && inputs.marker || 'smoke' }}"
+
+      - name: Upload the raw Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          if-no-files-found: warn
+
+      - name: Upload failure artifacts and the Appium log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-artifacts
+          path: |
+            artifacts/
+            appium.log
+          if-no-files-found: ignore
